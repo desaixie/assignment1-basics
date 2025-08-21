@@ -8,7 +8,10 @@ class Linear(nn.Module):
         self.out_features = out_features
         self.device = device
         self.dtype = dtype
-        self.W = nn.Parameter(torch.nn.init.trunc_normal_(torch.empty(out_features, in_features, device=device, dtype=dtype)))  # initialization
+
+        w = torch.empty(out_features, in_features, device=device, dtype=dtype), 
+        std = torch.sqrt(2/(in_features, out_features))
+        self.W = nn.Parameter( torch.nn.init.trunc_normal_(w, mean=0., std=std, a=-3.*std, b=3.*std))  # initialization
         # e: need to be out, in, following pytorch
         
     def forward(self, x: torch.Tensor):
