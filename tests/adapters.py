@@ -14,6 +14,7 @@ from cs336_basics.BPETokenizer import train_bpe, BPETokenizer
 from cs336_basics.linear import Linear
 from cs336_basics.embedding import Embedding
 from cs336_basics.RMSNorm import RMSNorm
+from cs336_basics.FFN_SwiGLU import FFN_SwiGLU
 
 
 def run_linear(
@@ -36,7 +37,9 @@ def run_linear(
     """
 
     linear = Linear(d_in, d_out)
-    linear.load_state_dict(weights)
+
+    state_dict = {'W': weights}
+    linear.load_state_dict(state_dict)
     return linear(in_features)
 
 
@@ -60,7 +63,8 @@ def run_embedding(
     """
 
     emb = Embedding(vocab_size, d_model)
-    emb.load_state_dict(weights)
+    state_dict = {'emb': weights}
+    emb.load_state_dict(state_dict)
     return emb(token_ids)
 
 
@@ -93,7 +97,15 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    ffn_swiglu = FFN_SwiGLU(d_model, d_ff)
+    state_dict = {}
+    state_dict["linear1.W"] = w1_weight  # e: correct way to specify statedict key: modulename.modulename.dots.nnParameter_name, which directly loads the weight tensor
+    state_dict["linear2.W"] = w2_weight
+    state_dict["linear3.W"] = w3_weight
+    ffn_swiglu.load_state_dict(state_dict)
+    print(in_features.shape, d_model, d_ff)
+    return ffn_swiglu(in_features)
+
 
 
 def run_scaled_dot_product_attention(
@@ -389,7 +401,8 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     rmsnorm = RMSNorm(d_model, eps)
-    rmsnorm.load_state_dict(weights)
+    state_dict = {'gain': weights}
+    rmsnorm.load_state_dict(state_dict)
     return rmsnorm(in_features)
 
 

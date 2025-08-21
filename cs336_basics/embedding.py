@@ -11,7 +11,3 @@ class Embedding(nn.Module):
     def forward(self, token_ids: Float[torch.Tensor, "batch seqlen"]):
         return self.emb[token_ids]
         
-    def load_state_dict(self, state_dict, strict = True, assign = False):
-        s = {}
-        s['emb'] = state_dict
-        return super().load_state_dict(s, strict, assign)

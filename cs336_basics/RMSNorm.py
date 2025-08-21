@@ -19,7 +19,3 @@ class RMSNorm(nn.Module):
         x = x.to(in_dtype)
         return x
     
-    def load_state_dict(self, state_dict, strict = True, assign = False):
-        s = {}
-        s['gain'] = state_dict
-        return super().load_state_dict(s, strict, assign)
