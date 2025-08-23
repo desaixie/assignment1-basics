@@ -16,7 +16,7 @@ from cs336_basics.embedding import Embedding
 from cs336_basics.RMSNorm import RMSNorm
 from cs336_basics.FFN_SwiGLU import FFN_SwiGLU
 from cs336_basics.RoPE import RoPE
-from cs336_basics.attention import softmax, scaled_dot_product_attention
+from cs336_basics.attention import softmax, scaled_dot_product_attention, MultiHeadAttention
 
 
 def run_linear(
@@ -162,7 +162,11 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mha = MultiHeadAttention(d_model, num_heads, disable_rope=True)
+    qkv_weights = torch.cat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    state_dict = {"qkv.W": qkv_weights, "out_proj.W": o_proj_weight}
+    mha.load_state_dict(state_dict)
+    return mha(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -202,7 +206,11 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mha = MultiHeadAttention(d_model, num_heads, theta, max_seq_len)
+    qkv_weights = torch.cat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    state_dict = {"qkv.W": qkv_weights, "out_proj.W": o_proj_weight}
+    mha.load_state_dict(state_dict)
+    return mha(in_features, token_positions)
 
 
 def run_rope(
