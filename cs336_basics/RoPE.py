@@ -35,7 +35,7 @@ class RoPE(nn.Module):
         ret = torch.stack(ret)
         return ret
     
-    """chatgpt version"""
+    """chatgpt version, no for loop, already close to the standalone, no 2x2 matrix version"""
     def compute_rope_buffer_chatgpt(self, ) -> torch.Tensor:
         d_over_2 = self.d_k // 2
         k = torch.arange(0, self.d_k, 2, dtype=torch.float32) / self.d_k            # (d_over_2,)
