@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
 
+"""
+resource accounting: 
+one matrix: (d_out, d_in)
+forward shape: (..., d_in) x (d_in, d_out) -> (..., d_out)
+forward flops: 2 x ... x d_in x d_out
+"""
 class Linear(nn.Module):
     def __init__(self, in_features: int, out_features: int, device: torch.device | None =None, dtype: torch.dtype | None =None):
         super().__init__()  # e: remember calling super().__init__()

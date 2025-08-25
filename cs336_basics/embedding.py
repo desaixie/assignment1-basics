@@ -2,6 +2,12 @@ import torch
 import torch.nn as nn
 from jaxtyping import Float
 
+"""
+resource accounting
+forward FLOPS: 0, since tensor slicing is not a FLOP.
+# parameters:
+    num_embeddings * embedding_dim = 50257 * 1600 = 80,411,200
+"""
 class Embedding(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, device: torch.device|None = None, dtype: torch.dtype | None = None):
         super().__init__()

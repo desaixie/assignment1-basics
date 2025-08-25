@@ -12,6 +12,19 @@ def softmax(x: Float[torch.Tensor, "..."], dim=-1) -> Float[torch.Tensor, "..."]
     normalizer = exp_x.sum(dim=dim, keepdim=True)
     return exp_x / normalizer
     
+"""
+resource accounting
+forward shapes
+1.1 (batch num_heads seqlen d_k) x (batch num_heads d_k seqlen) -> (batch num_heads seqlen seqlen)
+1.2 (batch num_heads seqlen seqlen) / (batch num_heads seqlen seqlen) 
+2. (batch num_heads seqlen seqlen) + (batch num_heads seqlen seqlen)
+3. softmax(batch num_heads seqlen seqlen). 4 FLOPs per element
+4. (batch num_heads seqlen seqlen) x (batch num_heads seqlen d_k) -> (batch num_heads seqlen d_k)
+
+forward FLOPs
+4*batch*num_heads*seqlen*seqlen*d_k + 6*batch*num_heads*seqlen*seqlen
+    two matmuls (same FLOPs) + 6 element-wise
+"""
 # passed test in one try
 def scaled_dot_product_attention(
             Q: Float[torch.Tensor, "batch ... seqlen d_k"], 
@@ -31,6 +44,20 @@ def scaled_dot_product_attention(
     attention_value = affinity_score @ V
     return attention_value
     
+"""
+resource accounting
+forward shapes
+1. (batch seqlen d_model) x (d_model 3*d_model) -> (batch seqlen 3*d_model)
+2. 2 RoPEs on (batch num_heads seqlen d_k)
+3. attention
+4. (batch seqlen d_model) x (d_model d_model) -> (batch seqlen d_model)
+
+forward FLOPs
+8*batch*seqlen*d_model*d_model + 4*batch*seqlen*d_model + 4*batch*d_model*seqlen*seqlen + 6*batch*num_heads*seqlen*seqlen = 8*BS*1600*1600 + 4*BS*1600 + 4*BSS*1600 + 6*BSS*25 = 20,486,400BS + 6,550BSS
+
+# parameters:
+    4 * d_model * d_model + 1 * RoPE = 10,371,072
+"""
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model: int, num_heads: int, theta: int | None = None, max_seq_len: int | None = None, device: torch.device | None = None, dtype: torch.dtype | None = None, disable_rope: bool = False):
         super().__init__()

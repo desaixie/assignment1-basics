@@ -8,6 +8,22 @@ from cs336_basics.RMSNorm import RMSNorm
 from cs336_basics.attention import MultiHeadAttention
 from cs336_basics.FFN_SwiGLU import FFN_SwiGLU
 
+"""
+resource accounting
+forward shape:
+1.1 RMSNorm(batch seqlen d_model) 
+1.2 attn(batch seqlen d_model)
+1.3 (batch seqlen d_model) + (batch seqlen d_model)
+2.1 RMSNorm(batch seqlen d_model)
+2.2 ffn(batch seqlen d_model)
+2.3 (batch seqlen d_model) + (batch seqlen d_model)
+
+forward FLOPs:
+two RMSNorms (9,600BS), two element-wise (3,200BS), 1 attn (20,486,400BS + 6,550BSS) , 1 ffn (61,478,400BS)
+
+# parameters:
+2 * 1600 + 10,371,072 + 30,720,000 = 41,094,272
+"""
 class Block(nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int, theta: int | None = None, max_seq_len: int | None = None, device: torch.device | None = None, dtype: torch.dtype | None = None, disable_rope: bool = False):
         super().__init__()
@@ -21,6 +37,16 @@ class Block(nn.Module):
         x = x + self.ffn(self.ln2(x))
         return x
         
+"""resource accounting
+total forward FLOPs:
+    n blocks, 1 embedding (0 FLOP), 1 RMSNorm, 1 linear(d_model, vocab_size)
+    48 * (9,600BS + 3,200BS + 20,486,400BS + 6,550BSS + 61,478,400BS) + 4,800BS + 2*BS*d_model*vocab_size = 4,095,752,000BS + 314,400BSS
+
+# parameters
+    48 * 41,094,272 + 80,411,200 + 1600 + 1600 * 50257 = 2,133,349,056 (2B)
+memory assuming bf16 (16 bits/2 bytes)
+    2,133,349,056 * 2 bytes = 4,266,698,112 bytes (4GB)
+"""
 class Transformer_LM(nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int, vocab_size: int, context_length: int, num_layers: int, theta: int | None = None, max_seq_len: int | None = None, device: torch.device | None = None, dtype: torch.dtype | None = None, disable_rope: bool = False):
         super().__init__()

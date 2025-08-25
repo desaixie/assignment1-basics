@@ -3,6 +3,20 @@ import torch.nn as nn
 from jaxtyping import Float, Int
 import einops
 
+"""
+resource accounting:
+pre-computed rope buffer can be ignored. slicing from self.rope and rearranging are not FLOPs.
+
+forward shape:
+    1. (... seqlen pairs 2 2) x (... seqlen pairs 2) -> (... seqlen pairs 2), from the einsuum
+
+forward FLOPs:
+    2*...*seqlen*(pairs*2)*2 = 4*...*seqlen*d_k
+
+# parameters:
+    context_len * d_k * 2 = 1024 * 64 * 2 = 131,072
+
+"""
 class RoPE(nn.Module):
     def __init__(self, theta: int, d_k: int, max_seq_len: int, device: torch.device | None = None, dtype: torch.dtype | None = None):
         super().__init__()
