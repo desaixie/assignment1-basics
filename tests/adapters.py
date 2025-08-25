@@ -17,6 +17,7 @@ from cs336_basics.RMSNorm import RMSNorm
 from cs336_basics.FFN_SwiGLU import FFN_SwiGLU
 from cs336_basics.RoPE import RoPE
 from cs336_basics.attention import softmax, scaled_dot_product_attention, MultiHeadAttention
+from cs336_basics.transformer import Block, Transformer_LM
 
 
 def run_linear(
@@ -306,7 +307,20 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    block = Block(d_model, num_heads, d_ff, theta=theta, max_seq_len=max_seq_len, dtype=torch.float32)
+    qkv_weights = torch.cat([weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight']], dim=0)
+    state_dict = {"attn.qkv.W": qkv_weights, 
+                  "attn.out_proj.W": weights['attn.output_proj.weight'], 
+                  "ln1.gain": weights['ln1.weight'], 
+                  "ln2.gain": weights['ln2.weight'], 
+                  "ffn.linear1.W": weights['ffn.w1.weight'],
+                  "ffn.linear2.W": weights['ffn.w2.weight'],
+                  "ffn.linear3.W": weights['ffn.w3.weight'],
+                  }
+    block.load_state_dict(state_dict, strict=True)
+    ret = block(in_features)
+    print(f"ret: {ret.dtype}")
+    return ret
 
 
 def run_transformer_lm(
@@ -388,7 +402,23 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    # block = Block(d_model, num_heads, d_ff, theta=rope_theta, max_seq_len=context_length, dtype=torch.float32)
+    transformer_lm = Transformer_LM(d_model, num_heads, d_ff, vocab_size, context_length, num_layers, theta=rope_theta, max_seq_len=context_length, dtype=torch.float32,)
+    state_dict = {'embedding.emb': weights['token_embeddings.weight'], 'ln_final.gain': weights['ln_final.weight'], 'lm_head.W': weights['lm_head.weight']}
+    for n in range(num_layers):
+        qkv_weights = torch.cat([weights[f'layers.{n}.attn.q_proj.weight'], weights[f'layers.{n}.attn.k_proj.weight'], weights[f'layers.{n}.attn.v_proj.weight'], ], dim=0)
+        state_dict.update({f"blocks.{n}.attn.qkv.W": qkv_weights, 
+                    f"blocks.{n}.attn.out_proj.W": weights[f'layers.{n}.attn.output_proj.weight'], 
+                    f"blocks.{n}.ln1.gain": weights[f'layers.{n}.ln1.weight'], 
+                    f"blocks.{n}.ln2.gain": weights[f'layers.{n}.ln2.weight'], 
+                    f"blocks.{n}.ffn.linear1.W": weights[f'layers.{n}.ffn.w1.weight'],
+                    f"blocks.{n}.ffn.linear2.W": weights[f'layers.{n}.ffn.w2.weight'],
+                    f"blocks.{n}.ffn.linear3.W": weights[f'layers.{n}.ffn.w3.weight'],
+                    })
+    transformer_lm.load_state_dict(state_dict, strict=True)
+    ret = transformer_lm(in_indices)
+    print(f"ret: {ret.dtype}")
+    return ret
 
 
 def run_rmsnorm(
@@ -411,6 +441,7 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
+    print(f"eps: {eps}")
     rmsnorm = RMSNorm(d_model, eps)
     state_dict = {'gain': weights}
     rmsnorm.load_state_dict(state_dict)

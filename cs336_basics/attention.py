@@ -20,11 +20,11 @@ def scaled_dot_product_attention(
             mask: Bool[torch.Tensor, "seqlen seqlen"] | None = None,
         ) -> Float[torch.Tensor, "batch ... d_v"]:
     d_k = Q.shape[-1]
-    affinity_logits = Q @ K.transpose(-1, -2) / torch.sqrt(torch.tensor(d_k)) # "batch ... seqlen seqlen"
+    affinity_logits = Q @ K.transpose(-1, -2) / torch.sqrt(torch.tensor(d_k, device=Q.device, dtype=Q.dtype)) # "batch ... seqlen seqlen"
     
     # mask
     if mask is not None:
-        adding_mask = torch.where(mask, torch.zeros_like(mask), torch.ones_like(mask) * float('-inf'))
+        adding_mask = torch.where(mask, torch.zeros_like(mask), torch.ones_like(mask) * float('-inf')).to(device=Q.device, dtype=torch.float32)
         affinity_logits += adding_mask
     
     affinity_score = softmax(affinity_logits, dim=-1)  # "batch ...", normalized over num keys dim
@@ -42,7 +42,7 @@ class MultiHeadAttention(nn.Module):
         if disable_rope:
             self.rope = None
         else:
-            self.rope = RoPE(theta, self.d_k, max_seq_len, device)
+            self.rope = RoPE(theta, self.d_k, max_seq_len, device, dtype=dtype)
     
     def forward(self, x: Float[torch.Tensor, "batch seqlen d_model"], token_positions: Int[torch.Tensor, "... seqlen"] | None = None) -> Float[torch.Tensor, "batch seqlen d_model"]:
         seqlen = x.shape[1]
@@ -57,6 +57,8 @@ class MultiHeadAttention(nn.Module):
 
         # apply rope
         if self.rope is not None:
+            if token_positions is None:
+                token_positions = torch.arange(0, seqlen, 1, device=x.device).unsqueeze(0)
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
         

@@ -4,7 +4,7 @@ from jaxtyping import Float, Int
 import einops
 
 class RoPE(nn.Module):
-    def __init__(self, theta: int, d_k: int, max_seq_len: int, device: torch.device | None = None):
+    def __init__(self, theta: int, d_k: int, max_seq_len: int, device: torch.device | None = None, dtype: torch.dtype | None = None):
         super().__init__()
         self.theta = theta
         self.d_k = d_k
@@ -12,7 +12,7 @@ class RoPE(nn.Module):
 
         rope = self.compute_rope_buffer()
         self.register_buffer("rope", rope, persistent=False)  # different from parameters, not learnable
-        self.rope.to(device=device)
+        self.rope = self.rope.to(device=device, dtype=dtype)
         self.device = device
         
     def compute_rope_buffer(self) -> Float[torch.Tensor, "max_seq_len pairs 2 2"]:
