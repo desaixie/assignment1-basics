@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from jaxtyping import Float, Int
 from collections.abc import Callable
+from typing import List
 import math
 
 class AdamW(torch.optim.Optimizer):
@@ -42,3 +43,38 @@ class AdamW(torch.optim.Optimizer):
                 state["v"] = v
 
         return loss
+
+def gradient_clipping(param: List[nn.Parameter], max_grad_norm: float, eps: float = 1e-6):
+    print(f"param_group: {type(param)}")  # tuple of 5x5 random tensors
+    # for p in param:
+    #     print(f"p: {p.shape}")
+    #     if p.grad is None:
+    #         continue
+    #     norm = torch.linalg.vector_norm(p.grad.data.flatten(), ord=2)
+    #     # norm = p.grad.detach().data.norm(2)
+    #     print(f"grad: {p.grad.data}")
+    #     print(f"norm: {norm}, max_grad_norm: {max_grad_norm}")
+    #     if norm > max_grad_norm:
+    #         p.grad.data = p.grad.data * max_grad_norm / (norm + eps)
+    #     print(f"grad_after: {p.grad.data}")
+    #     print(f"norm_after: {torch.linalg.vector_norm(p.grad.data.flatten(), ord=2)}")
+    
+    # for p in param:
+    #     if p.grad is None:
+    #         continue
+    #     print(f"norm_after: {torch.linalg.vector_norm(p.grad.data.flatten(), ord=2)}")
+
+    # e: above implementation computes norm and scales norm per param. the correct implementation should compute norm and scale norm over all param together.
+    param = [p for p in param if p.grad is not None]
+
+    per_param_norm = torch.stack([p.grad.detach().norm(2) for p in param])
+    norm = per_param_norm.norm(2)
+    # norm = p.grad.detach().data.norm(2)
+    print(f"total norm: {norm}, max_grad_norm: {max_grad_norm}")
+    if norm > max_grad_norm:
+        for p in param:
+            p.grad.data = p.grad.data * max_grad_norm / (norm + eps)
+    for p in param:
+        if p.grad is None:
+            continue
+        print(f"norm_after: {torch.linalg.vector_norm(p.grad.data.flatten(), ord=2)}")
