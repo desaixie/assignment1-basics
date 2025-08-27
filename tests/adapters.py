@@ -21,6 +21,7 @@ from cs336_basics.transformer import Block, Transformer_LM
 from cs336_basics.cross_entropy import cross_entropy_loss
 from cs336_basics.AdamW import AdamW, gradient_clipping
 from cs336_basics.lr_scheduler import lr_cosine_schedule
+from cs336_basics.train import Dataloader, collate_fn, dataloader
 
 
 def run_linear(
@@ -485,7 +486,10 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    # dataloader = Dataloader(dataset, context_length, device)
+    # tuple_list = [dataloader.next() for _ in range(batch_size)]
+    # return collate_fn(tuple_list)
+    return dataloader(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
