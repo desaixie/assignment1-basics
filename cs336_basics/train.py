@@ -5,6 +5,8 @@ from jaxtyping import Float, Int
 from collections.abc import Callable
 from typing import List, Tuple
 import math
+import os
+import typing
 
 """implements a sample without replacement dataset"""
 class Dataloader:
@@ -42,3 +44,13 @@ def dataloader(x: Int[np.ndarray, "data_size"], batch_size: int, context_length:
     token_ids = x[indices_batch].to(device=device)
     target_ids = x[indices_batch+1].to(device=device)
     return token_ids, target_ids
+    
+def save_checkpoint(model: nn.Module, optimizer: torch.optim.Optimizer, iteration: int, out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes]):
+    ckpt = {"model": model.state_dict(), "optimizer": optimizer.state_dict(), "iteration": iteration}
+    torch.save(ckpt, out)
+
+def load_checkpoint(src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes], model: nn.Module, optimizer: torch.optim.Optimizer):
+    ckpt = torch.load(src)
+    model.load_state_dict(ckpt["model"])
+    optimizer.load_state_dict(ckpt["optimizer"])
+    return ckpt["iteration"]
