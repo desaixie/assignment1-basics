@@ -7,6 +7,22 @@ from typing import List, Tuple
 import math
 import os
 import typing
+import argparse
+from pathlib import Path
+import datetime
+
+from cs336_basics.BPETokenizer import train_bpe, BPETokenizer
+from cs336_basics.linear import Linear
+from cs336_basics.embedding import Embedding
+from cs336_basics.RMSNorm import RMSNorm
+from cs336_basics.FFN_SwiGLU import FFN_SwiGLU
+from cs336_basics.RoPE import RoPE
+from cs336_basics.attention import softmax, scaled_dot_product_attention, MultiHeadAttention
+from cs336_basics.transformer import Block, Transformer_LM
+from cs336_basics.cross_entropy import cross_entropy_loss
+from cs336_basics.perplexity import perplexity
+from cs336_basics.AdamW import AdamW, gradient_clipping
+from cs336_basics.lr_scheduler import lr_cosine_schedule
 
 """implements a sample without replacement dataset"""
 class Dataloader:
@@ -54,3 +70,92 @@ def load_checkpoint(src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model.load_state_dict(ckpt["model"])
     optimizer.load_state_dict(ckpt["optimizer"])
     return ckpt["iteration"]
+    
+def train(args):
+    now = datetime.now()
+    # consturct model
+    model = Transformer_LM(args.d_model, args.num_heads, args.vocab_size, args.context_length, args.num_layers, args.theta, args.context_length, args.device, args.model_dtype)
+    model.to(args.device)
+
+    # construct optimizer
+    optimizer = AdamW(model.parameters(), args.lr, (args.beta1, args.beta2), args.eps, args.weight_decay)
+    
+    start_step = 0
+    if args.resume_path:
+        start_step = load_checkpoint(args.resume_path, model, optimizer)
+        
+    # load data
+    data = np.memmap(args.data_path)
+    dataloader = Dataloader(data, args.context_length, args.device)
+
+    # training loop
+    for i in range(start_step, args.train_steps):
+        # train_one_step
+        tuple_list = [dataloader.next() for _ in range(args.batch_size)]
+        batch = collate_fn(tuple_list)
+        input_batch, target_batch = batch
+        
+        output = model(input_batch)
+        loss = cross_entropy_loss(output, target_batch)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        
+        # validation_step
+        # TODO separate val data?
+        if i % args.val_every_step == 0:
+            with torch.no_grad():
+                output = model(input_batch)
+                losses = cross_entropy_loss(output, target_batch)
+                val_loss = perplexity(losses)
+
+        # logging
+        if i % args.log_every_step == 0:
+            print(f"step: {i}, loss: {loss.item()}, val_loss: {val_loss.item()}")
+            # TODO ema of lsses
+
+        # save checkpoint
+        if i % args.save_every_step == 0:
+            timestamp = now.strftime("%Y%m%d_%H%M%S")
+            save_dir = Path(args.save_dir) / timestamp
+            save_checkpoint(model, optimizer, i, save_dir / f"step_{i}.ckpt")
+        
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # model
+    parser.add_argument('--d_model', type=int)
+    parser.add_argument('--num_heads', type=int)
+    parser.add_argument('--vocab_size', type=int)
+    parser.add_argument('--context_length', type=int)
+    parser.add_argument('--num_layers', type=int)
+    parser.add_argument('--theta', type=float)
+    parser.add_argument('--context_length', type=int)
+    parser.add_argument('--device', type=str, default='mps')
+    parser.add_argument('--model_dtype', type=str, default='bf16')
+
+    # optimizer
+    parser.add_argument('--lr', type=float)
+    parser.add_argument('--beta1', type=float)
+    parser.add_argument('--beta2', type=float)
+    parser.add_argument('--eps', type=float)
+    parser.add_argument('--weight_decay', type=float)
+
+    # data
+    parser.add_argument('--data_path', type=str)
+    parser.add_argument('--batch_size', type=int)
+    
+    # training loop
+    parser.add_argument('--train_steps', type=int)
+    parser.add_argument('--val_every_step', type=int, default=10)
+    parser.add_argument('--log_every_step', type=int, default=10)
+    parser.add_argument('--save_every_step', type=int, default=50)
+    parser.add_argument('--resume_path', type=str, default='')
+
+    
+
+    args = parser.parse_args()
+    if args.model_dtype == 'bf16':
+        args.model_dtype = torch.bfloat16
+    args.device = torch.device(args.device)
+    train(args)
