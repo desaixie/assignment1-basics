@@ -10,15 +10,9 @@ import typing
 import argparse
 from pathlib import Path
 import datetime
+from functools import partial
 
-from cs336_basics.BPETokenizer import train_bpe, BPETokenizer
-from cs336_basics.linear import Linear
-from cs336_basics.embedding import Embedding
-from cs336_basics.RMSNorm import RMSNorm
-from cs336_basics.FFN_SwiGLU import FFN_SwiGLU
-from cs336_basics.RoPE import RoPE
-from cs336_basics.attention import softmax, scaled_dot_product_attention, MultiHeadAttention
-from cs336_basics.transformer import Block, Transformer_LM
+from cs336_basics.transformer import Transformer_LM
 from cs336_basics.cross_entropy import cross_entropy_loss
 from cs336_basics.perplexity import perplexity
 from cs336_basics.AdamW import AdamW, gradient_clipping
@@ -78,11 +72,15 @@ def train(args):
     model.to(args.device)
 
     # construct optimizer
-    optimizer = AdamW(model.parameters(), args.lr, (args.beta1, args.beta2), args.eps, args.weight_decay)
+    lr_scheduler = partial(lr_cosine_schedule, lrmax=args.lrmax, lrmin=args.lrmin, num_warmup=args.num_warmup, num_cosine=args.num_cosine)
+    optimizer = AdamW(model.parameters(), 0.1, (args.beta1, args.beta2), args.eps, args.weight_decay)
+    
     
     start_step = 0
     if args.resume_path:
         start_step = load_checkpoint(args.resume_path, model, optimizer)
+    
+    optimizer.param_groups[0]['lr'] = lr_scheduler(start_step)  # update lr in AdamW
         
     # load data
     data = np.memmap(args.data_path)
@@ -98,8 +96,14 @@ def train(args):
         output = model(input_batch)
         loss = cross_entropy_loss(output, target_batch)
         loss.backward()
+        gradient_clipping(model.parameters(), max_grad_norm=args.max_grad_norm)
         optimizer.step()
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
+
+        # update lr in AdamW
+        lr = lr_scheduler(i)
+        for group in optimizer.param_groups:
+            group['lr'] = lr
         
         # validation_step
         # TODO separate val data?
@@ -135,11 +139,15 @@ if __name__ == "__main__":
     parser.add_argument('--model_dtype', type=str, default='bf16')
 
     # optimizer
-    parser.add_argument('--lr', type=float)
+    parser.add_argument('--lrmax', type=float)
+    parser.add_argument('--lrmin', type=float)
     parser.add_argument('--beta1', type=float)
     parser.add_argument('--beta2', type=float)
     parser.add_argument('--eps', type=float)
     parser.add_argument('--weight_decay', type=float)
+    parser.add_argument('--num_warmup', type=int)
+    parser.add_argument('--num_cosine', type=int)
+    parser.add_argument('--max_grad_norm', type=float)
 
     # data
     parser.add_argument('--data_path', type=str)

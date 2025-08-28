@@ -38,9 +38,9 @@ class AdamW(torch.optim.Optimizer):
                 p.data -= lr * decay_ratio * p.data
                 
                 # update state
-                self.t += 1
                 state["m"] = m
                 state["v"] = v
+            self.t += 1  # e: shouldn't be in the inner loop
 
         return loss
 
