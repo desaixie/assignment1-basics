@@ -10,7 +10,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from cs336_basics.BPETokenizer import train_bpe, BPETokenizer
+from cs336_basics.train_bpe import *  # https://github.com/kkaitlyn111/cs336-assignment1
+from cs336_basics.simple_tokenizer import *
 from cs336_basics.linear import Linear
 from cs336_basics.embedding import Embedding
 from cs336_basics.RMSNorm import RMSNorm
@@ -633,8 +634,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    tokenizer = BPETokenizer(vocab, merges, special_tokens)
-    return tokenizer
+    return Tokenizer(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
@@ -664,5 +664,4 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
-    return (vocab, merges)
+    return train_bpe(input_path, vocab_size, special_tokens, **kwargs)
