@@ -57,6 +57,7 @@ class Transformer_LM(nn.Module):
             ])  # e: need nn.ModuleList instead of a plain list to hold the blocks, so they are visible to Module methods like load_state_dict and to optimizers
         self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
         self.lm_head = Linear(d_model, vocab_size, device, dtype)
+        self.vocab_size = vocab_size
     
     def forward(self, token_ids: Int[torch.Tensor, "batch seqlen"]) -> Float[torch.Tensor, "batch seqlen vocab_size"]:
         x = self.embedding(token_ids)

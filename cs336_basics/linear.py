@@ -16,7 +16,7 @@ class Linear(nn.Module):
         self.dtype = dtype
 
         w = torch.empty(out_features, in_features, device=device, dtype=dtype) 
-        std = torch.sqrt(torch.tensor(2 / (in_features + out_features)))
+        std = torch.sqrt(torch.tensor(2 / (in_features + out_features), device=device))
         self.W = nn.Parameter( torch.nn.init.trunc_normal_(w, mean=0., std=std, a=-3.*std, b=3.*std))  # initialization
         # e: need to be out, in, following pytorch
         
