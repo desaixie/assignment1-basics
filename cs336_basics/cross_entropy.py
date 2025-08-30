@@ -34,7 +34,21 @@ def cross_entropy_loss_canceled_0(logits: Float[torch.Tensor, "batch ... vocab_s
     return loss
 
 """using labels as index version"""
-def cross_entropy_loss(logits: Float[torch.Tensor, "batch ... vocab_size"], labels: Int[torch.Tensor, " batch_size"]) -> float:
+def cross_entropy_loss(logits: Float[torch.Tensor, "batch seqlen vocab_size"], labels: Int[torch.Tensor, "batch seqlen"]) -> float:
+    print(f"logits: {logits.shape}, labels: {labels.shape}")
+    if logits.ndim == 3:
+        batch_size, seqlen, vocab_size = logits.shape
+        assert labels.shape[0] == batch_size
+        assert labels.shape[1] == seqlen
+        assert labels.ndim == 2
+        labels_view = (batch_size, seqlen, 1)
+    elif logits.ndim == 2:
+        batch_size, vocab_size = logits.shape
+        assert labels.shape[0] == batch_size
+        assert labels.ndim == 1
+        labels_view = (batch_size, 1)
+    else:
+        raise
     # softmax
     # e: not an error, but improvement is to not -= max_logits but separate this operation
     max_logits = logits.max(dim=-1, keepdim=True).values
@@ -44,9 +58,8 @@ def cross_entropy_loss(logits: Float[torch.Tensor, "batch ... vocab_size"], labe
 
 
     # true_logits = logits[..., labels].unsqueeze(-1)  # e: could cause problems. use gather!
-    labels_view = [1,] * len(logits.shape)
-    labels_view[0] = -1
-    true_logits = torch.gather(logits, -1, labels.view(*labels_view)).view(*labels.shape)
+    print(f"after logits: {logits.shape}, labels: {labels.view(*labels_view).shape}")
+    true_logits = torch.gather(logits, -1, labels.view(*labels_view))
 
     # cross entropy
     # loss_all = - (true_logits - normalizer.log())

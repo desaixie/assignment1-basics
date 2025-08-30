@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, RandomSampler, BatchSampler
 import numpy as np
 from jaxtyping import Float, Int
 from collections.abc import Callable
@@ -11,6 +12,9 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from functools import partial
+import wandb
+from tqdm.auto import tqdm
+import time
 
 from cs336_basics.transformer import Transformer_LM
 from cs336_basics.cross_entropy import cross_entropy_loss
@@ -31,42 +35,28 @@ def load_data_regular(file_path, dtype=np.int32):
     print(f"Loaded {len(data)} tokens")
     return data
 
-"""implements a sample without replacement dataset"""
-class Dataloader:
+"""custom torch dataset: returns a single sample, len checks upper bound"""
+class TextDataset(torch.utils.data.Dataset):
     def __init__(self, x: Int[np.ndarray, "data_size"], context_length: int, device: str):
-        x = torch.from_numpy(x)
+        super().__init__()
         self.data = x
         self.context_length = context_length
+        self.valid_len = x.shape[0] - context_length
+        # self.device = device
 
-        data_size = x.shape[0]
-        valid_indices = torch.arange(data_size - context_length)  # e: should start from 0 not 1, error in handout
-        self.starting_indices = valid_indices[torch.randperm(valid_indices.shape[0])]
-        self.cur_position = 0
-        self.device = device
-
-    def next(self) -> Tuple[Int[torch.Tensor, "contextlen"], Int[torch.Tensor, "contextlen"]]:
-        starting_ind = self.starting_indices[self.cur_position]
-        self.cur_position += 1
-
-        indices = starting_ind + torch.arange(self.context_length)
-        token_ids = self.data[indices].to(device=self.device)
-        target_ids = self.data[indices+1].to(device=self.device)
+    # e: switched to torch custom Dataset + torch Dataloader
+    def __getitem__(self, idx) -> Tuple[Int[torch.Tensor, "contextlen"], Int[torch.Tensor, "contextlen"]]:
+        token_ids = torch.from_numpy(self.data[idx:idx+self.context_length]).to(dtype=torch.int64)  # e: delay move to device to training thread
+        target_ids = torch.from_numpy(self.data[idx+1:idx+1+self.context_length]).to(dtype=torch.int64)
         return token_ids, target_ids
+    
+    def __len__(self):
+        return self.valid_len
 
 def collate_fn(tuple_list: List[Tuple[Int[torch.Tensor, "contextlen"], Int[torch.Tensor, "contextlen"]]]) -> Tuple[Int[torch.Tensor, "batch contextlen"], Int[torch.Tensor, "batch contextlen"]]:
     l = list(zip(*tuple_list))
     return torch.stack(l[0], dim=0), torch.stack(l[1], dim=0)
 
-
-""" sample with replacement"""
-def dataloader(x: Int[np.ndarray, "data_size"], batch_size: int, context_length: int, device: str) -> Tuple[Int[torch.Tensor, "batch contextlen"], Int[torch.Tensor, "batch contextlen"]]:
-    x = torch.from_numpy(x)
-    data_size = x.shape[0]
-    i = torch.randint(0, data_size - context_length, size=(batch_size,1))  # e: should start from 0 not 1, error in handout
-    indices_batch = i + torch.arange(context_length).unsqueeze(0)
-    token_ids = x[indices_batch].to(device=device)
-    target_ids = x[indices_batch+1].to(device=device)
-    return token_ids, target_ids
     
 def save_checkpoint(model: nn.Module, optimizer: torch.optim.Optimizer, iteration: int, out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes]):
     ckpt = {"model": model.state_dict(), "optimizer": optimizer.state_dict(), "iteration": iteration}
@@ -83,6 +73,8 @@ def train(args):
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     print(f"time: {timestamp}")
     print(f'args: {args}')
+    
+    wandb.init(project="cs336_a1", config=args, name=args.name)
 
     # tokenizer
     # from https://github.com/kkaitlyn111/cs336-assignment1/blob/main/cs336_basics/training_loop.py
@@ -124,10 +116,14 @@ def train(args):
         valid_data = load_data_memmap(args.pretokens_valid_path)
 
     # consturct model
+    print("building model")
     model = Transformer_LM(args.d_model, args.num_heads, args.d_ff, args.vocab_size, args.context_length, args.num_layers, args.theta, args.context_length, args.device, args.model_dtype)
     model.to(args.device)
+    model = torch.compile(model, backend="aot_eager")
+    wandb.watch(model)
 
     # construct optimizer
+    print("building optimizer")
     lr_scheduler = partial(lr_cosine_schedule, lrmax=args.lrmax, lrmin=args.lrmin, num_warmup=args.num_warmup, num_cosine=args.num_cosine)
     optimizer = AdamW(model.parameters(), 0.1, (args.beta1, args.beta2), args.eps, args.weight_decay)
     
@@ -139,23 +135,41 @@ def train(args):
     optimizer.param_groups[0]['lr'] = lr_scheduler(start_step)  # update lr in AdamW
         
     # load data
-    # data = np.memmap(args.data_path)
-    dataloader = Dataloader(train_data, args.context_length, args.device)
-    val_dataloader = Dataloader(valid_data, args.context_length, args.device)
+    print("creating dataloader")
+    pin_memory = True if "cuda" in str(args.device) else False
+    prefetch = 2 if args.num_workers > 0 else None
+
+    dataset = TextDataset(train_data, args.context_length, args.device)
+    sampler = RandomSampler(dataset, replacement=True, num_samples=args.train_steps * args.batch_size)
+    dataloader = iter(DataLoader(dataset, batch_size=args.batch_size, sampler=sampler, collate_fn=collate_fn, num_workers=args.num_workers, pin_memory=pin_memory, persistent_workers=args.num_workers>0, prefetch_factor=prefetch))
+
+    val_dataset = TextDataset(valid_data, args.context_length, args.device)
+    val_sampler = RandomSampler(val_dataset, replacement=True, num_samples=args.train_steps * args.batch_size // args.val_every_step)
+    val_dataloader = iter(DataLoader(val_dataset, batch_size=args.batch_size, sampler=val_sampler, collate_fn=collate_fn, num_workers=args.num_workers, pin_memory=pin_memory, persistent_workers=args.num_workers>0, prefetch_factor=prefetch))
 
     # training loop
+    progress_bar = tqdm(
+        range(0, args.train_steps),
+        initial=start_step,
+        desc="Steps",
+        # Only show the progress bar once on each machine.
+        disable=False
+    )
     for i in range(start_step, args.train_steps):
         # train_one_step
-        tuple_list = [dataloader.next() for _ in range(args.batch_size)]
-        batch = collate_fn(tuple_list)
-        input_batch, target_batch = batch
+        start_time = time.time()
+        batch = next(dataloader)
+        input_batch, target_batch = batch[0].to(args.device, non_blocking=pin_memory), batch[1].to(args.device, non_blocking=pin_memory)
         
         output = model(input_batch)
         loss = cross_entropy_loss(output, target_batch)
         loss.backward()
-        gradient_clipping(model.parameters(), max_grad_norm=args.max_grad_norm)
+        grad_norm = gradient_clipping(model.parameters(), max_grad_norm=args.max_grad_norm)
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
+        step_time = time.time() - start_time
+        
+        wandb_dict = {"loss": loss, "global_step": i, "grad_norm": grad_norm, "step_time": step_time}
 
         # update lr in AdamW
         lr = lr_scheduler(i)
@@ -163,15 +177,14 @@ def train(args):
             group['lr'] = lr
         
         # validation_step
-        # TODO separate val data?
         if i % args.val_every_step == 0:
             with torch.no_grad():
-                tuple_list = [val_dataloader.next() for _ in range(args.batch_size)]
-                batch = collate_fn(tuple_list)
-                input_batch, target_batch = batch
+                batch = next(val_dataloader)
+                input_batch, target_batch = batch[0].to(args.device, non_blocking=pin_memory), batch[1].to(args.device, non_blocking=pin_memory)
                 output = model(input_batch)
                 losses = cross_entropy_loss(output, target_batch)
                 val_loss = perplexity(losses)
+                wandb_dict["val_loss": val_loss]
 
         # logging
         if i % args.log_every_step == 0:
@@ -182,6 +195,10 @@ def train(args):
         if i % args.save_every_step == 0:
             save_dir = Path(args.save_dir) / timestamp
             save_checkpoint(model, optimizer, i, save_dir / f"step_{i}.ckpt")
+
+        progress_bar.set_postfix(wandb_dict)
+        progress_bar.update(1)
+        wandb.log(wandb_dict)
         
 
 if __name__ == "__main__":
@@ -204,11 +221,11 @@ if __name__ == "__main__":
     parser.add_argument('--beta2', type=float, default=0.999)
     parser.add_argument('--eps', type=float, default=1e-8)
     parser.add_argument('--weight_decay', type=float, default=0.01)
-    parser.add_argument('--num_warmup', type=int, default=0)
-    parser.add_argument('--num_cosine', type=int, default=0)
+    parser.add_argument('--num_warmup', type=int, default=100)
+    parser.add_argument('--num_cosine', type=int, default=5000)
     parser.add_argument('--max_grad_norm', type=float, default=1.0)
 
-    # tokenizer
+    # tokenizer and data
     parser.add_argument("--train_path", type=str, default = "data/TinyStoriesV2-GPT4-train.txt")
     parser.add_argument("--valid_path", type=str, default = "data/TinyStoriesV2-GPT4-valid.txt")
     parser.add_argument("--vocab_path", type=str, default = "tinystories_vocab.pkl")
@@ -217,19 +234,18 @@ if __name__ == "__main__":
     parser.add_argument("--pretokens_train_path", type=str, default="data/openweb-train-tokenized.npy", help="Path to pretokenized training data")
     parser.add_argument("--pretokens_valid_path", type=str, default="data/openweb-valid-tokenized.npy", help="Path to pretokenized validation data")
     parser.add_argument("--reuse_pretokens", action="store_true", default = True, help="Reuse existing pretokenized data if available")
-    parser.add_argument("--use_memmap", type=bool, default=False)
+    parser.add_argument("--use_memmap", type=bool, default=True)
     parser.add_argument("--use_parallel_pretokenize", type=bool, default=True)  # Default to parallel for full dataset
-
-    # data
-    parser.add_argument('--data_path', type=str)
-    parser.add_argument('--batch_size', type=int, default=128)  # batch_size * train_steps * context_length = 327680000
+    parser.add_argument("--num_workers", type=int, default=0)  # 0 or 10 for m4 macbook
     
     # training loop
-    parser.add_argument('--train_steps', type=int, default=1e4)
+    parser.add_argument('--batch_size', type=int, default=32)  # batch_size * train_steps * context_length = 40000000
+    parser.add_argument('--train_steps', type=int, default=5000)
     parser.add_argument('--val_every_step', type=int, default=10)
     parser.add_argument('--log_every_step', type=int, default=10)
     parser.add_argument('--save_every_step', type=int, default=50)
     parser.add_argument('--resume_path', type=str, default='')
+    parser.add_argument('--name', type=str)
 
     
 

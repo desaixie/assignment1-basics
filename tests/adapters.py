@@ -9,6 +9,7 @@ import numpy.typing as npt
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.utils.data import DataLoader
 
 from cs336_basics.train_bpe import *  # https://github.com/kkaitlyn111/cs336-assignment1
 from cs336_basics.simple_tokenizer import *
@@ -22,7 +23,7 @@ from cs336_basics.transformer import Block, Transformer_LM
 from cs336_basics.cross_entropy import cross_entropy_loss
 from cs336_basics.AdamW import AdamW, gradient_clipping
 from cs336_basics.lr_scheduler import lr_cosine_schedule
-from cs336_basics.train import Dataloader, collate_fn, dataloader, load_checkpoint, save_checkpoint
+from cs336_basics.train import collate_fn, TextDataset, load_checkpoint, save_checkpoint
 
 
 def run_linear(
@@ -487,10 +488,12 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    # dataloader = Dataloader(dataset, context_length, device)
+    dataset = TextDataset(dataset, context_length, device)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
     # tuple_list = [dataloader.next() for _ in range(batch_size)]
-    # return collate_fn(tuple_list)
-    return dataloader(dataset, batch_size, context_length, device)
+    return next(iter(dataloader))  # e: need iter before next
+    # return dataloader(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:

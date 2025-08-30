@@ -70,12 +70,10 @@ class RoPE(nn.Module):
         # select tokens
         token_positions = token_positions.to(self.device)
         # advanced indexing. the ... dimensions in token_positiosn are broadcasted to self.rope at the beginning
-        print(f"before, rope: {self.rope.shape}")
         rope = self.rope[token_positions]  # "... seqlen pairs 2 2"
 
         # e: cannot use bare number 2; have to use variable with value, e.g. two=2
         x = einops.rearrange(x, "... seqlen (pairs two)-> ... seqlen pairs two", two=2)  # split
-        print(f"token_positions: {token_positions}, x: {x.shape}, rope: {rope.shape}")
         # x = x @ rope  # or rope.T?
         x = einops.einsum(rope, x, "... seqlen pairs i j, ... seqlen pairs j -> ... seqlen pairs i")  # vec dot over the 2nd dim in the 2x2 R and the 2-pair in x
         x = einops.rearrange(x, "... seqlen pairs two-> ... seqlen (pairs two)", two=2)  # merge
