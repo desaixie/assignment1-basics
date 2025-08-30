@@ -46,8 +46,8 @@ class TextDataset(torch.utils.data.Dataset):
 
     # e: switched to torch custom Dataset + torch Dataloader
     def __getitem__(self, idx) -> Tuple[Int[torch.Tensor, "contextlen"], Int[torch.Tensor, "contextlen"]]:
-        token_ids = torch.from_numpy(self.data[idx:idx+self.context_length]).to(dtype=torch.int64)  # e: delay move to device to training thread
-        target_ids = torch.from_numpy(self.data[idx+1:idx+1+self.context_length]).to(dtype=torch.int64)
+        token_ids = torch.tensor(self.data[idx:idx+self.context_length]).to(dtype=torch.int64)  # e: delay move to device to training thread
+        target_ids = torch.tensor(self.data[idx+1:idx+1+self.context_length]).to(dtype=torch.int64)
         return token_ids, target_ids
     
     def __len__(self):
@@ -155,6 +155,7 @@ def train(args):
         # Only show the progress bar once on each machine.
         disable=False
     )
+    lr = lr_scheduler(start_step)
     for i in range(start_step, args.train_steps):
         # train_one_step
         start_time = time.time()
@@ -169,7 +170,7 @@ def train(args):
         optimizer.zero_grad(set_to_none=True)
         step_time = time.time() - start_time
         
-        wandb_dict = {"loss": loss, "global_step": i, "grad_norm": grad_norm, "step_time": step_time}
+        wandb_dict = {"loss": loss.item(), "global_step": i, "grad_norm": grad_norm.item(), "step_time": step_time, "lr": lr}
 
         # update lr in AdamW
         lr = lr_scheduler(i)
@@ -182,20 +183,18 @@ def train(args):
                 batch = next(val_dataloader)
                 input_batch, target_batch = batch[0].to(args.device, non_blocking=pin_memory), batch[1].to(args.device, non_blocking=pin_memory)
                 output = model(input_batch)
-                losses = cross_entropy_loss(output, target_batch)
-                val_loss = perplexity(losses)
-                wandb_dict["val_loss": val_loss]
-
-        # logging
-        if i % args.log_every_step == 0:
-            print(f"step: {i}, loss: {loss.item()}, val_loss: {val_loss.item()}")
-            # TODO ema of lsses
+                val_loss = cross_entropy_loss(output, target_batch)
+                val_perpl = perplexity(val_loss)
+                wandb_dict["val_loss"] = val_loss.item()
+                wandb_dict["val_perpl"] = val_perpl.item()
 
         # save checkpoint
         if i % args.save_every_step == 0:
             save_dir = Path(args.save_dir) / timestamp
+            save_dir.mkdir(parents=True, exist_ok=True)
             save_checkpoint(model, optimizer, i, save_dir / f"step_{i}.ckpt")
 
+        del wandb_dict["step_time"]
         progress_bar.set_postfix(wandb_dict)
         progress_bar.update(1)
         wandb.log(wandb_dict)
@@ -212,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_layers', type=int, default=4)
     parser.add_argument('--theta', type=float, default=10000.)
     parser.add_argument('--device', type=str, default='mps')
-    parser.add_argument('--model_dtype', type=str, default='bf16')
+    parser.add_argument('--model_dtype', type=str, default='float32')
 
     # optimizer
     parser.add_argument('--lrmax', type=float, default=1e-4)
@@ -246,11 +245,16 @@ if __name__ == "__main__":
     parser.add_argument('--save_every_step', type=int, default=50)
     parser.add_argument('--resume_path', type=str, default='')
     parser.add_argument('--name', type=str)
+    parser.add_argument('--save_dir', type=str, default='logs/')
 
     
 
     args = parser.parse_args()
     if args.model_dtype == 'bf16':
         args.model_dtype = torch.bfloat16
+    elif args.model_dtype == 'float32': 
+        args.model_dtype = torch.float32
+    else:
+        raise
     args.device = torch.device(args.device)
     train(args)

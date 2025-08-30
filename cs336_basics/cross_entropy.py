@@ -35,7 +35,6 @@ def cross_entropy_loss_canceled_0(logits: Float[torch.Tensor, "batch ... vocab_s
 
 """using labels as index version"""
 def cross_entropy_loss(logits: Float[torch.Tensor, "batch seqlen vocab_size"], labels: Int[torch.Tensor, "batch seqlen"]) -> float:
-    print(f"logits: {logits.shape}, labels: {labels.shape}")
     if logits.ndim == 3:
         batch_size, seqlen, vocab_size = logits.shape
         assert labels.shape[0] == batch_size
@@ -58,7 +57,6 @@ def cross_entropy_loss(logits: Float[torch.Tensor, "batch seqlen vocab_size"], l
 
 
     # true_logits = logits[..., labels].unsqueeze(-1)  # e: could cause problems. use gather!
-    print(f"after logits: {logits.shape}, labels: {labels.view(*labels_view).shape}")
     true_logits = torch.gather(logits, -1, labels.view(*labels_view))
 
     # cross entropy
